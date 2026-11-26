@@ -76,6 +76,7 @@ With the default settings, 1 real second equals 0.5 simulated operating hours, s
 Useful knobs in `docker-compose.yml`: `MACHINE_COUNT`, `SIM_HOURS_PER_SECOND`, `FAULT_RATE`, `SEED`, and `AUTO_STOP_ON_CRITICAL` (closed-loop stop).
 
 ### Connect a simulated ESP32 (Wokwi)
+▶ **Try it online:** [Open in Wokwi](https://wokwi.com/projects/481780769308684289)
 
 See [docs/WOKWI_SETUP.md](docs/WOKWI_SETUP.md). In short: enable the Mosquitto bridge, then paste `firmware/wokwi/main.py` and `diagram.json` into a Wokwi MicroPython ESP32 project. Turn the potentiometer to raise vibration and watch the backend react.
 
@@ -109,3 +110,5 @@ Python · MicroPython · ESP32 (Wokwi) · MQTT (Mosquitto, paho-mqtt, aiomqtt) �
 - ML model (e.g. Isolation Forest / gradient boosting on RUL) trained on accumulated history
 - MQTT authentication + TLS, per-device credentials
 - OTA firmware updates
+
+
