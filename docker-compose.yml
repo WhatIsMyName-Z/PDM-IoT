@@ -1,0 +1,56 @@
+# ระบบทั้งหมดรันด้วยคำสั่งเดียว: docker compose up --build
+# ลำดับการไหลของข้อมูล: simulator / ESP32 -> mosquitto (MQTT) -> backend -> postgres
+#                                                            \-> dashboard (WebSocket)
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"   # MQTT สำหรับอุปกรณ์
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/conf.d:/mosquitto/config/conf.d:ro
+    restart: unless-stopped
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: pdm
+      POSTGRES_PASSWORD: pdm
+      POSTGRES_DB: pdm
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pdm"]
+      interval: 3s
+      retries: 20
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    environment:
+      MQTT_HOST: mosquitto
+      DATABASE_URL: postgresql://pdm:pdm@db:5432/pdm
+    ports:
+      - "8000:8000"   # API + dashboard
+    depends_on:
+      db:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    restart: unless-stopped
+
+  simulator:
+    build: ./simulator
+    environment:
+      MQTT_HOST: mosquitto
+      MACHINE_COUNT: "8"
+      # 1 วินาทีจริง = กี่ชั่วโมงในโลกจำลอง (ทำให้เห็นการเสื่อมของเครื่องภายในไม่กี่นาที)
+      SIM_HOURS_PER_SECOND: "0.5"
+    depends_on:
+      - mosquitto
+    restart: unless-stopped
+
+volumes:
+  pgdata:

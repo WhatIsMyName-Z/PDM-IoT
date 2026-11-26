@@ -1,0 +1,24 @@
+# ---------------------------------------------------------------
+# Bridge: เชื่อม broker ในเครื่องเรา กับ public broker (HiveMQ)
+# ---------------------------------------------------------------
+# ทำไมต้องมี? Wokwi (เวอร์ชันฟรี) รันอยู่บนอินเทอร์เน็ต มองไม่เห็น localhost ของเรา
+# ESP32 ใน Wokwi จึงส่งข้อมูลไปที่ broker.hivemq.com แทน
+# แล้ว bridge นี้จะดึงข้อความจากที่นั่นเข้ามาใน broker ของเรา (และส่งคำสั่งกลับออกไป)
+#
+# วิธีเปิดใช้:
+#   1) คัดลอกไฟล์นี้เป็น bridge.conf
+#   2) เปลี่ยน "pdm-demo-CHANGE-ME/" ให้เป็นชื่อเฉพาะของเรา (ต้องตรงกับ TOPIC_PREFIX ในเฟิร์มแวร์)
+#   3) docker compose restart mosquitto
+#
+# หมายเหตุ: public broker ใครก็อ่านได้ ใช้สำหรับเดโมเท่านั้น ห้ามส่งข้อมูลจริง
+
+connection hivemq-bridge
+address broker.hivemq.com:1883
+bridge_protocol_version mqttv311
+cleansession true
+try_private false
+
+# รูปแบบ: topic <pattern> <direction> <qos> <local-prefix> <remote-prefix>
+# ฝั่งเรา:   factory/line2/W01/telemetry
+# ฝั่ง HiveMQ: pdm-demo-CHANGE-ME/factory/line2/W01/telemetry
+topic factory/# both 1 "" pdm-demo-CHANGE-ME/

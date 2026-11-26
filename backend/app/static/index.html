@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PdM Monitor — Predictive Maintenance</title>
+<script src="/static/vendor/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1216; --panel: #171b21; --line: #262c35; --text: #e6e9ee; --muted: #8a93a0;
+    --ok: #3ecf8e; --warn: #f5b942; --crit: #f0554f; --info: #5aa9ff; --off: #5b636e;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 "IBM Plex Sans Thai", "Noto Sans Thai", system-ui, sans-serif;
+         background: var(--bg); color: var(--text); }
+  header { display: flex; align-items: center; gap: 20px; padding: 14px 24px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: .02em; }
+  header h1 span { color: var(--muted); font-weight: 400; }
+  .kpis { display: flex; gap: 22px; margin-left: auto; }
+  .kpi b { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+  .kpi small { color: var(--muted); }
+  .conn { font-size: 12px; color: var(--muted); }
+  .conn.ok::before, .conn.bad::before { content: "●  "; }
+  .conn.ok::before { color: var(--ok); } .conn.bad::before { color: var(--crit); }
+
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; padding: 16px 24px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; cursor: pointer;
+          transition: border-color .15s; }
+  .card:hover { border-color: #3a424e; }
+  .card.selected { border-color: var(--info); }
+  .card .top { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .card .id { font-weight: 600; font-size: 15px; }
+  .card .ln { color: var(--muted); font-size: 12px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--off); }
+  .dot.online { background: var(--ok); } .dot.stale { background: var(--warn); } .dot.offline { background: var(--crit); }
+  .badge { margin-left: auto; font-size: 11px; padding: 1px 7px; border-radius: 99px; background: #222831; color: var(--muted); }
+  .badge.running { color: var(--ok); } .badge.fault { color: #fff; background: var(--crit); } .badge.stopped { color: var(--warn); }
+  .bar { height: 5px; border-radius: 3px; background: #222831; overflow: hidden; margin: 4px 0 10px; }
+  .bar i { display: block; height: 100%; background: var(--ok); transition: width .4s, background .4s; }
+  .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px; font-variant-numeric: tabular-nums; }
+  .metrics small { color: var(--muted); }
+  .rul { margin-top: 8px; font-size: 12px; color: var(--muted); }
+  .rul.warn { color: var(--warn); } .rul.crit { color: var(--crit); font-weight: 600; }
+
+  .detail-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  .detail-head h2 { margin: 0; }
+  .controls { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+  button, select { font: inherit; font-size: 13px; color: var(--text); background: #222831; border: 1px solid var(--line);
+                   border-radius: 7px; padding: 5px 11px; cursor: pointer; }
+  button:hover { border-color: #46505d; }
+  button.danger { border-color: #5a2a28; color: #ffb3ae; }
+  button.primary { border-color: #24476b; color: #a9d1ff; }
+  .chart-box { position: relative; height: 300px; }
+
+  .alerts { display: flex; flex-direction: column; gap: 6px; max-height: calc(100vh - 150px); overflow: auto; }
+  .alert { border-left: 3px solid var(--warn); background: #1c2128; padding: 7px 10px; border-radius: 0 7px 7px 0; }
+  .alert.critical { border-left-color: var(--crit); }
+  .alert.ack { opacity: .45; }
+  .alert .meta { display: flex; gap: 8px; font-size: 12px; color: var(--muted); }
+  .alert .meta b { color: var(--text); }
+  .alert .meta button { margin-left: auto; padding: 0 8px; font-size: 11px; }
+  .empty { color: var(--muted); padding: 20px 0; text-align: center; }
+  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #24476b; padding: 8px 16px;
+           border-radius: 8px; opacity: 0; transition: opacity .3s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } .kpis { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>PdM Monitor <span>· Predictive Maintenance</span></h1>
+  <div id="conn" class="conn bad">กำลังเชื่อมต่อ…</div>
+  <div class="kpis">
+    <div class="kpi"><b id="k-online">–</b><small>ออนไลน์</small></div>
+    <div class="kpi"><b id="k-risk">–</b><small>เสี่ยงเสีย</small></div>
+    <div class="kpi"><b id="k-alerts">–</b><small>แจ้งเตือนค้าง</small></div>
+    <div class="kpi"><b id="k-loss">–</b><small>ข้อมูลหาย</small></div>
+  </div>
+</header>
+
+<main>
+  <section>
+    <div id="grid" class="grid"></div>
+    <div class="panel">
+      <div class="detail-head">
+        <h2 id="d-title">เลือกเครื่องเพื่อดูรายละเอียด</h2>
+        <div class="controls" id="controls" hidden>
+          <button class="danger" data-cmd="stop">หยุดเครื่อง</button>
+          <button data-cmd="start">เริ่มเครื่อง</button>
+          <button class="primary" data-cmd="maintenance">บันทึกการซ่อมบำรุง</button>
+          <select id="interval" title="รอบการส่งข้อมูล">
+            <option value="">รอบส่งข้อมูล…</option>
+            <option value="0.5">ทุก 0.5 วิ</option><option value="1">ทุก 1 วิ</option>
+            <option value="2">ทุก 2 วิ</option><option value="5">ทุก 5 วิ</option>
+          </select>
+        </div>
+      </div>
+      <div class="chart-box"><canvas id="chart"></canvas></div>
+    </div>
+  </section>
+
+  <aside class="panel">
+    <h2>การแจ้งเตือน</h2>
+    <div id="alerts" class="alerts"><div class="empty">ยังไม่มีการแจ้งเตือน</div></div>
+  </aside>
+</main>
+<div id="toast"></div>
+
+<script>
+// ---------------------------------------------------------------
+// สถานะฝั่งหน้าเว็บ
+// ---------------------------------------------------------------
+const machines = {};          // machine_id -> ข้อมูลล่าสุด
+let alerts = [];
+let selected = null;
+const MAX_POINTS = 300;
+const $ = (id) => document.getElementById(id);
+
+// ---------------------------------------------------------------
+// กราฟ: ความสั่น (แกนซ้าย) + อุณหภูมิ (แกนขวา) + เส้นเกณฑ์
+// ---------------------------------------------------------------
+Chart.defaults.color = "#8a93a0";
+Chart.defaults.borderColor = "#262c35";
+const chart = new Chart($("chart"), {
+  type: "line",
+  data: { labels: [], datasets: [
+    { label: "ความสั่น (mm/s)", data: [], borderColor: "#5aa9ff", yAxisID: "y", pointRadius: 0, borderWidth: 2, tension: .2 },
+    { label: "อุณหภูมิ (°C)", data: [], borderColor: "#f5b942", yAxisID: "y1", pointRadius: 0, borderWidth: 2, tension: .2 },
+    { label: "เกณฑ์วิกฤตความสั่น 4.5", data: [], borderColor: "#f0554f", borderDash: [5, 4], yAxisID: "y", pointRadius: 0, borderWidth: 1 },
+  ]},
+  options: {
+    animation: false, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+    scales: {
+      x: { ticks: { maxTicksLimit: 8 } },
+      // ล็อกแกนไว้ที่ 10: spike ของเซนเซอร์ (เช่น 25 mm/s) จะไม่บีบกราฟจนมองแนวโน้มจริงไม่เห็น
+      y: { position: "left", min: 0, max: 10, title: { display: true, text: "mm/s" } },
+      y1: { position: "right", suggestedMin: 25, suggestedMax: 100, grid: { drawOnChartArea: false }, title: { display: true, text: "°C" } },
+    },
+    plugins: { legend: { labels: { boxWidth: 12 } } },
+  },
+});
+
+function pushPoint(ts, vib, temp) {
+  const d = chart.data;
+  d.labels.push(new Date(ts).toLocaleTimeString("th-TH"));
+  d.datasets[0].data.push(vib); d.datasets[1].data.push(temp); d.datasets[2].data.push(4.5);
+  if (d.labels.length > MAX_POINTS) { d.labels.shift(); d.datasets.forEach((s) => s.data.shift()); }
+}
+
+async function selectMachine(id) {
+  selected = id;
+  $("d-title").textContent = `${id} · ข้อมูล 10 นาทีล่าสุด`;
+  $("controls").hidden = false;
+  chart.data.labels = []; chart.data.datasets.forEach((s) => (s.data = []));
+  const rows = await (await fetch(`/api/machines/${id}/telemetry?minutes=10`)).json();
+  rows.slice(-MAX_POINTS).forEach((r) => pushPoint(r.ts, r.vib_rms, r.temp_c));
+  chart.update();
+  renderGrid();
+}
+
+// ---------------------------------------------------------------
+// การ์ดเครื่องจักร
+// ---------------------------------------------------------------
+function healthColor(h) { return h == null ? "var(--off)" : h >= 70 ? "var(--ok)" : h >= 40 ? "var(--warn)" : "var(--crit)"; }
+const fmt = (v, d = 1) => (v == null ? "–" : Number(v).toFixed(d));
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function rulText(m) {
+  if (m.state === "fault") return ["crit", "เครื่องเสีย ต้องซ่อม"];
+  if (m.rul_h == null) return ["", "ยังไม่พบแนวโน้มเสื่อม"];
+  const cls = m.rul_h <= 10 ? "crit" : m.rul_h <= 30 ? "warn" : "";
+  return [cls, `คาดว่าเหลือ ~${Math.round(m.rul_h)} ชม.การทำงาน`];
+}
+
+function renderGrid() {
+  const ids = Object.keys(machines).sort();
+  $("grid").innerHTML = ids.map((id) => {
+    const m = machines[id];
+    const [rc, rt] = rulText(m);
+    return `<div class="card ${id === selected ? "selected" : ""}" data-id="${esc(id)}">
+      <div class="top"><span class="dot ${esc(m.status)}" title="${esc(m.status)}"></span>
+        <span class="id">${esc(id)}</span><span class="ln">${esc(m.line)}</span>
+        <span class="badge ${esc(m.state)}">${esc(m.state || "–")}</span></div>
+      <small style="color:var(--muted)">สุขภาพ ${fmt(m.health, 0)}%</small>
+      <div class="bar"><i style="width:${m.health ?? 0}%;background:${healthColor(m.health)}"></i></div>
+      <div class="metrics">
+        <span><small>สั่น</small> ${fmt(m.vib_rms, 2)}</span><span><small>°C</small> ${fmt(m.temp_c)}</span>
+        <span><small>A</small> ${fmt(m.current_a)}</span><span><small>RPM</small> ${fmt(m.rpm, 0)}</span>
+      </div>
+      <div class="rul ${rc}">${rt}</div></div>`;
+  }).join("");
+  const list = Object.values(machines);
+  $("k-online").textContent = `${list.filter((m) => m.status === "online").length}/${list.length}`;
+  $("k-risk").textContent = list.filter((m) => m.state === "fault" || (m.rul_h != null && m.rul_h <= 30)).length;
+}
+$("grid").addEventListener("click", (e) => { const c = e.target.closest(".card"); if (c) selectMachine(c.dataset.id); });
+
+// ---------------------------------------------------------------
+// การแจ้งเตือน
+// ---------------------------------------------------------------
+function renderAlerts() {
+  $("k-alerts").textContent = alerts.filter((a) => !a.acknowledged).length;
+  if (!alerts.length) return;
+  $("alerts").innerHTML = alerts.slice(0, 100).map((a) => `
+    <div class="alert ${esc(a.level)} ${a.acknowledged ? "ack" : ""}">
+      <div class="meta"><b>${esc(a.machine_id)}</b><span>${new Date(a.ts).toLocaleTimeString("th-TH")}</span>
+        <span>${esc(a.kind)}</span>${a.acknowledged ? "" : `<button data-ack="${a.id}">รับทราบ</button>`}</div>
+      <div>${esc(a.message)}</div></div>`).join("");
+}
+$("alerts").addEventListener("click", async (e) => {
+  const id = e.target.dataset.ack; if (!id) return;
+  await fetch(`/api/alerts/${id}/ack`, { method: "POST" });
+  const a = alerts.find((x) => x.id == id); if (a) a.acknowledged = true;
+  renderAlerts();
+});
+
+// ---------------------------------------------------------------
+// ส่งคำสั่งลงอุปกรณ์
+// ---------------------------------------------------------------
+async function sendCommand(cmd, value) {
+  if (cmd === "stop" && !confirm(`ยืนยันหยุดเครื่อง ${selected}?`)) return;
+  const res = await fetch(`/api/machines/${selected}/command`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cmd, value }),
+  });
+  toast(res.ok ? `ส่งคำสั่ง ${cmd} แล้ว รอเครื่องยืนยัน…` : `ส่งไม่สำเร็จ: ${(await res.json()).detail}`);
+}
+$("controls").addEventListener("click", (e) => { const c = e.target.dataset.cmd; if (c) sendCommand(c); });
+$("interval").addEventListener("change", (e) => { if (e.target.value) sendCommand("set_interval", Number(e.target.value)); e.target.value = ""; });
+
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2500); }
+
+// ---------------------------------------------------------------
+// WebSocket: รับข้อมูล real-time (ต่อใหม่เองถ้าหลุด)
+// ---------------------------------------------------------------
+function connect() {
+  const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+  ws.onopen = () => { $("conn").className = "conn ok"; $("conn").textContent = "real-time"; };
+  ws.onclose = () => { $("conn").className = "conn bad"; $("conn").textContent = "หลุดการเชื่อมต่อ กำลังลองใหม่…"; setTimeout(connect, 2000); };
+  ws.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    const m = (machines[msg.machine_id] ??= { machine_id: msg.machine_id, line: "", status: "online" });
+    if (msg.type === "telemetry") {
+      Object.assign(m, msg);
+      if (msg.machine_id === selected) { pushPoint(msg.ts, msg.vib_rms, msg.temp_c); chart.update("none"); }
+    } else if (msg.type === "status") {
+      m.status = msg.status;
+    } else if (msg.type === "alert") {
+      alerts.unshift(msg); renderAlerts();
+    } else if (msg.type === "ack") {
+      toast(`${msg.machine_id} ยืนยันคำสั่ง ${msg.cmd} ${msg.ok ? "✓" : "(ไม่มีผล)"}`);
+    }
+  };
+}
+
+// โหลดข้อมูลเริ่มต้นผ่าน REST แล้วค่อยรับส่วนที่เปลี่ยนผ่าน WebSocket
+async function init() {
+  for (const m of await (await fetch("/api/machines")).json()) machines[m.machine_id] = m;
+  alerts = await (await fetch("/api/alerts?limit=100")).json();
+  renderGrid(); renderAlerts(); connect();
+  const ids = Object.keys(machines).sort(); if (ids.length) selectMachine(ids[0]);
+  setInterval(renderGrid, 1000);   // วาดการ์ดใหม่วินาทีละครั้งพอ ไม่ต้องทุกข้อความ
+  setInterval(async () => { const s = await (await fetch("/api/stats")).json();
+    $("k-loss").textContent = s.received ? `${(100 * s.missing / (s.received + s.missing)).toFixed(2)}%` : "–"; }, 5000);
+}
+init();
+</script>
+</body>
+</html>
